@@ -2,44 +2,53 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Upload to S3</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload to S3 and Fetch Sentiment Analysis</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> 
 </head>
 <body>
     <h1>Upload File to S3</h1>
     <input type="file" id="fileInput" />
     <button onclick="uploadFile()">Upload</button>
 
+    <!-- Adjusted canvas size to make it smaller -->
+    <canvas id="sentimentChart" style="width: 120px; height: 60px;"></canvas>
+    <canvas id="sentimentBarGraph" style="width: 120px; height: 60px;"></canvas>
+
     <script>
         async function uploadFile() {
             const fileInput = document.getElementById('fileInput');
             const file = fileInput.files[0];
-            const objectKey = Math.random()+file.name;
-            const fileName = file.name;
-            const fileExtension = fileName.split('.').pop().toLowerCase();
-            if(fileExtension!="csv")
-            {
-                alert("Ensure that the file you are uploading is in csv fromat")
-                return;
-            } 
-        
-            const s3Url = `https://reviewanalyser.s3.ap-south-1.amazonaws.com/${objectKey}`;
 
             if (!file) {
                 alert('Please choose a file to upload.');
                 return;
             }
 
+            const fileName = file.name;
+            const fileExtension = fileName.split('.').pop().toLowerCase();
+
+            if (fileExtension !== "csv") {
+                alert("Ensure that the file you are uploading is in CSV format.");
+                return;
+            }
+
+            const objectKey = `${Date.now()}_${file.name}`; // Generate a unique object key
+            const s3Url = `https://reviewanalyser.s3.ap-south-1.amazonaws.com/${objectKey}`;
+
             try {
+                // Upload the file to S3
                 const uploadResponse = await fetch(s3Url, {
                     method: 'PUT',
                     body: file,
                     headers: {
-                        'Content-Type': file.type 
+                        'Content-Type': file.type
                     }
                 });
 
                 if (uploadResponse.ok) {
                     alert('File uploaded successfully!');
+                    await fetchSentimentData(objectKey); // Fetch sentiment data from Lambda
                 } else {
                     console.error('Error uploading file:', uploadResponse.statusText);
                 }
@@ -47,24 +56,165 @@
                 console.error('Error:', error);
             }
         }
+        
+        async function fetchSentimentData(objectKey) {
+            const lambdaApiUrl = `https://jo121qgfy7.execute-api.ap-south-1.amazonaws.com/Prod/sentiment-data`;
+
+            try {
+                const response = await fetch(lambdaApiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        queryStringParameters: {
+                            bucketName: "reviewanalyser"
+                        }
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log("Full response data:", data); 
+                    const sentimentData = data.body.SentimentData; 
+                    console.log("Extracted sentiment data:", sentimentData);
+
+                    if (sentimentData) {
+                        displayDoughnutChart(sentimentData);
+                        displayBarChart(sentimentData);
+                    } else {
+                        console.error("Sentiment data is missing or improperly formatted.");
+                    }
+                } else {
+                    console.error('Error fetching sentiment data:', response.statusText);
+                }
+            } catch (error) {
+                console.error('Error fetching data from Lambda:', error);
+            }
+        }
+
+        function displayDoughnutChart(sentimentData) {
+            console.log("Sentiment Data:", sentimentData);
+
+            if (!sentimentData || 
+                typeof sentimentData.Positive !== 'number' || 
+                typeof sentimentData.Negative !== 'number' || 
+                typeof sentimentData.Neutral !== 'number' || 
+                typeof sentimentData.Mixed !== 'number') {
+                console.error("Invalid sentiment data format.");
+                return;
+            }
+
+            const ctx = document.getElementById('sentimentChart').getContext('2d');
+
+            if (window.myChart) {
+                window.myChart.destroy();
+            }
+
+            window.myChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Positive', 'Negative', 'Neutral', 'Mixed'],
+                    datasets: [{
+                        label: 'Sentiment Analysis',
+                        data: [
+                            sentimentData.Positive * 100, 
+                            sentimentData.Negative * 100, 
+                            sentimentData.Neutral * 100,
+                            sentimentData.Mixed * 100
+                        ],
+                        backgroundColor: [
+                            'rgba(75, 192, 192, 0.5)',  // Positive - Teal
+                            'rgba(255, 99, 132, 0.5)',  // Negative - Red
+                            'rgba(201, 203, 207, 0.5)', // Neutral - Grey
+                            'rgba(255, 205, 86, 0.5)'   // Mixed - Yellow
+                        ],
+                        borderColor: [
+                            'rgba(75, 192, 192, 1)',
+                            'rgba(255, 99, 132, 1)',
+                            'rgba(201, 203, 207, 1)',
+                            'rgba(255, 205, 86, 1)'
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        tooltip: {
+                            enabled: true
+                        }
+                    }
+                }
+            });
+        }
+        function displayBarChart(sentimentData) {
+    console.log("Sentiment Data:", sentimentData);
+
+    if (!sentimentData || 
+        typeof sentimentData.Positive !== 'number' || 
+        typeof sentimentData.Negative !== 'number' || 
+        typeof sentimentData.Neutral !== 'number' || 
+        typeof sentimentData.Mixed !== 'number') {
+        console.error("Invalid sentiment data format.");
+        return;
+    }
+
+    const ctx = document.getElementById('sentimentBarGraph').getContext('2d');
+
+    if (window.myChart) {
+        window.myChart.destroy();
+    }
+
+    window.myChart = new Chart(ctx, {
+        type: 'bar', // Corrected the chart type
+        data: {
+            labels: ['Positive', 'Negative', 'Neutral', 'Mixed'],
+            datasets: [{
+                label: 'Sentiment Analysis',
+                data: [
+                    sentimentData.Positive * 100, 
+                    sentimentData.Negative * 100, 
+                    sentimentData.Neutral * 100,
+                    sentimentData.Mixed * 100
+                ],
+                backgroundColor: [
+                    'rgba(75, 192, 192, 0.5)',  // Positive - Teal
+                    'rgba(255, 99, 132, 0.5)',  // Negative - Red
+                    'rgba(201, 203, 207, 0.5)', // Neutral - Grey
+                    'rgba(255, 205, 86, 0.5)'   // Mixed - Yellow
+                ],
+                borderColor: [
+                    'rgba(75, 192, 192, 1)',
+                    'rgba(255, 99, 132, 1)',
+                    'rgba(201, 203, 207, 1)',
+                    'rgba(255, 205, 86, 1)'
+                ],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: {
+                    position: 'top',
+                },
+                tooltip: {
+                    enabled: true
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+}
+
     </script>
 </body>
 </html>
-
-
-<!-- <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="style.css">
-    <title>Document</title>
-</head>
-<body>
-    <form action="/add" method="post" class="form" enctype="multipart/form-data">
-        <label for="files">Select file</label>
-        <input type="file" id="files" name="uploaded_file" class="hidden"/>
-        <button type="submit">Submit</button>
-    </form>
-</body>
-</html> -->
